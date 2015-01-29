@@ -17,16 +17,15 @@ public class NGramDriver{
 		String sentence = scan.nextLine();
 		String input = "";
 		
-		/* Remove non characters/non-spaces from input file, convert to lowercase
-		 */
+		// Remove non-characters/non-spaces from input file, convert to lowercase
 		try {
 			FileReader reader = new FileReader(fileName);
 			int next = reader.read();
 			while (next != -1){
 				char c = (char) next;
-				if (c > 'A' && c < 'Z')
+				if (c >= 'A' && c <= 'Z')
 					c += 32;
-				if (c > 'a' && c < 'z' || c == 32) // 32 = ' '
+				if ((c >= 'a' && c <= 'z') || c == 32) // 32 = ' '
 					input += c;
 				next = reader.read();
 			}
