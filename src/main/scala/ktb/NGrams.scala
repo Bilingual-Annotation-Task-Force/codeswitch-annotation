@@ -23,25 +23,32 @@ import edu.stanford.nlp.ling.CoreAnnotations;
  * accuracy w/ incorporated NER:
  * n = 5: 0.9401750198886237
  * 
+ * accuracy after removing punctuation, tabs, newlines from training data:
+ * n = 5: 0.9404932378679396
  */
 
 object NGrams {
 
   def main(args: Array[String]): Unit = {
     
-    val engData = Source.fromFile("EngCorpus-1m.txt").getLines().flatMap(_.split(" ")).filter(w => !w.isEmpty()).map(_.toLowerCase()).toVector
-    val spanData = Source.fromFile("MexCorpus.txt").getLines().flatMap(_.split(" ")).filter(w => !w.isEmpty()).map(_.toLowerCase()).toVector
     val n = 5 
-    
+    val engData = toWords(Source.fromFile("EngCorpus-1m.txt").getLines().toVector)
+    val spanData = toWords(Source.fromFile("MexCorpus.txt").getLines().toVector)
     val enModel = new NgramModel("Eng", getConditionalCounts(engData, n), n)
     val esModel = new NgramModel("Span", getConditionalCounts(spanData, n), n)
     val cslm = new codeSwitchedLanguageModel(Vector(enModel, esModel))
-    
-    val accuracy = cslm.evaluate("Solorio_GoldSt_7k-retagged.txt")
-    println("accuracy: " + accuracy)
+    cslm.annotate("Killer_Cronicas")
+    println("accuracy: " + cslm.evaluate("Solorio_7k"))
     
   } 
   
+  /*
+   * Removes tabs, newlines, and punctutation from training data and converts all words to lowercase
+   */
+  def toWords(lines: Vector[String]) = lines flatMap { line =>
+    line.replaceAll("\\t|\\n|\\r|\\p{P}", "").split(" ").filter(w => !w.isEmpty()) map (_.toLowerCase)
+  }
+
        
   def getNgrams(string: String, n: Int): Iterator[String] = {
     val stringWithStartEnd = (" " * (n - 1)) + string + " "
@@ -101,56 +108,101 @@ object NGrams {
       return guess(0).getLanguage()
     }
     
-    
-    def evaluate(filename: String) : Double = {
-      
-      var outputFile = new FileOutputStream("output.txt")
-      var output = new PrintStream(outputFile)
-      output.println("Word\tCorrect Language\tGuessed Language")
+    def prob(language: String, word: String) : Double = {
+      models.filter(x => x.getLanguage() == language)(0).stringProb(word)
+    }
+
+    /* evaluating unannotated text (Killer Cronicas)
+    */
+    def annotate(filename: String) = {
+
+      var output = new PrintStream(new FileOutputStream(filename + "-output.txt"))
+      output.println("Token,Tag")
       
       // initialize named entity recognizer (NER)
       var serializedClassifier = "classifiers/english.nowiki.3class.distsim.crf.ser.gz"
       var classifier = CRFClassifier.getClassifier(serializedClassifier);
-  
-      // counts of correct and total guesses to calculate accuracy
+
+      val tokens = Source.fromFile(filename).getLines().flatMap(_.split(" ")).filter(w => !w.isEmpty()).toVector
+      tokens.foreach { x =>
+        output.print(x + ",")
+        val word = x.toLowerCase()
+        if (word.charAt(0) >= 'a' && word.charAt(0) <= 'z') { 
+           // check to see if word is a named entity, i.e., <PERSON>, <LOCATION>, etc. 
+           var classification = classifier.classifyWithInlineXML(word)
+           if (classification.charAt(0) == '<'){
+             output.println("NAMED ENTITY")
+           }              
+           else {
+             val guessedLang = guess(word)
+             output.println(guessedLang)
+           }
+          
+        }
+        // otherwise, word is punctuation and should not be evaluated
+        else {
+          output.println("OTHER")
+        }
+      }
+
+    }
+    
+   /* evaluate accuracy against gold standard (Solorio's)
+   */   
+    def evaluate(filename: String) : Double = {
+
+      var outputFile = new FileOutputStream(filename + "-output.txt")
+      var output = new PrintStream(outputFile)
+      val lines = Source.fromFile(filename).getLines()
+      
+      // initialize named entity recognizer (NER)
+      var serializedClassifier = "classifiers/english.nowiki.3class.distsim.crf.ser.gz"
+      var classifier = CRFClassifier.getClassifier(serializedClassifier);
+      
+      // counts to calculate accuracy
       var correct = 0
       var total = 0
-      val lines = Source.fromFile(filename).getLines()
       
       lines.foreach { x =>
         val tokens = x.split(",")
-        output.print(tokens(0) + " ")
+        output.print(tokens(0) + ",")
         val word = tokens(0).toLowerCase()
         if (word.charAt(0) >= 'a' && word.charAt(0) <= 'z') { 
           
            // check to see if word is a named entity, i.e., <PERSON>, <LOCATION>, etc. 
            var classification = classifier.classifyWithInlineXML(word)
            if (classification.charAt(0) == '<'){
-             var tag = classification.split('>')(0)
-             output.println("NAMED ENTITY - " + tag + ">")
+             output.println("NAMED ENTITY")
            }
            
            // else, guess the language using n-gram models and update count of correct guesses
            else {
              val correctLang = tokens(tokens.length - 1)
              val guessedLang = guess(word)
-             if (guessedLang == correctLang)
+             output.print(guessedLang + ",")
+             if (guessedLang == correctLang){
                correct += 1
+               output.println("CORRECT")
+             }
+             else {
+               output.println("INCORRECT")
+             }
              total += 1
-             output.print(correctLang + " " + guessedLang + " \n")
            }
           
         }
         // otherwise, word is punctuation and should not be evaluated
         else {
-          output.print(tokens(tokens.length - 1) + " Other\n")
+          output.println("Other")
         }
       }
       
-      // caluclate and return accuracy
       return correct.toDouble / total.toDouble
     }
-  }
     
+    
+  }
   
+  
+     
 }
