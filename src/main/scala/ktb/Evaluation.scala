@@ -21,12 +21,13 @@ object Evaluation {
     val n = 5 
     val engData = toWords(Source.fromFile("EngCorpus-1m.txt").getLines().toVector)
     val spanData = toWords(Source.fromFile("MexCorpus.txt").getLines().toVector)
-    val enModel = new NgramModel("Eng", getConditionalCounts(engData, n), n)
-    val esModel = new NgramModel("Span", getConditionalCounts(spanData, n), n)
+    val enModel = new NgramModel("english", getConditionalCounts(engData, n), n)
+    val esModel = new NgramModel("spanish", getConditionalCounts(spanData, n), n)
     val cslm = new codeSwitchedLanguageModel(Vector(enModel, esModel))
     val eval = new Evaluator(cslm)
-    eval.annotate("Killer_Cronicas")
-    println("accuracy: " + eval.evaluate("Solorio_7k"))
+    //eval.annotate("Killer_Cronicas")
+    //println("accuracy: " + eval.evaluate("Solorio_7k"))
+    eval.evalWithHmm("Killer_Cronicas")
   }
 
 
@@ -115,9 +116,86 @@ class Evaluator(cslm : codeSwitchedLanguageModel) {
       return correct.toDouble / total.toDouble
     }
     
-    
+    def evalWithHmm(filename: String) = {
+      val words = Source.fromFile(filename).getLines().flatMap(_.split(" ")).filter(w => !w.isEmpty()).toArray
+      var output = new PrintStream(new FileOutputStream(filename + "-outputwithHMM.txt"))
+      val tags = Array("english", "spanish")
+      val engprobs = Array(0.6, 0.4)
+      val spanprobs = Array(0.4, 0.6)
+      val eng = tags zip engprobs toMap 
+      val span = tags zip spanprobs toMap
+      val transitions = (tags zip Array(eng, span)) toMap
+      
+      val model = new HMM(words, tags, transitions, cslm)
+      model.viterbi()
+      output.println(model.retrace())
+      println("finished")
+    }
+ 
+}
 
+
+class HMM(words: Array[String], tagSet: Array[String], transitions: Map[String, Map[String, Double]], cslm: codeSwitchedLanguageModel) {
   
+  val v = Array.ofDim[Node](words.length, tagSet.length)
+  
+  def em(ctx: String, word: String) : Double = {
+    cslm.prob(ctx, word)
+  }
+  
+  def tr(ctx: String, tag: String) : Double = {
+    transitions.get(ctx).get(tag)
+  }
+  
+  def viterbi() = {
+    
+      // init; equal probability of starting with either tag
+      for (tag <- 0 until tagSet.length) {
+        v(0)(tag) = new Node(0.5, tag) 
+      }
+
+      for (word <- 1 until words.length) {
+        for (tag <- 0 until tagSet.length) {
+          //println(tagSet(tag), words(word))
+          val priors = new Array[Node](tagSet.length)
+          for (prevTag <- 0 until tagSet.length) {
+            val transitionProb = v(word-1)(prevTag).getProb * tr(tagSet(prevTag), tagSet(tag))
+            priors(prevTag) = new Node(transitionProb, prevTag)
+            //println("from " + prevTag + " to " + tag + ": " + transitionProb)
+          }
+          
+          // find maximally probable previous tag
+          var max = priors(0)
+          for (t <- 1 until tagSet.length) {
+            if (priors(t).getProb > max.getProb)
+              max = priors(t)
+          }
+          //println("maxProb : " + max.getProb + ", maxPrev: " + max.getPrev)
+          val emissionProb = em(tagSet(tag), words(word))
+          //println("emission " + word + " under " + tag + ": " + emissionProb)
+          v(word)(tag) = new Node(emissionProb * max.getProb, max.getPrev)     
+          //println("v(" + words(word) + ")(" + tagSet(tag) + "): " + v(word)(tag).getProb)
+        }       
+      }
+    
+  }
+  def retrace() : String = {
+    val tags = new Array[String](words.length)
+    val last = if (v(words.length - 1)(0).getProb > v(words.length - 1)(1).getProb) 0 else 1
+    tags(words.length - 1) = tagSet(last)
+    var prev = v(words.length - 1)(last).getPrev
+    for (k <- (words.length - 2) to 0 by -1){
+      tags(k) = tagSet(prev)
+      prev = v(k)(prev).getPrev  
+    }
+    (words zip tags).mkString(" ")
+  }
+  
+  class Node(prob: Double, prevTag: Int) {
+      def getProb() : Double = { prob }
+      def getPrev() : Int = { prevTag }
+  }
+      
 }
 
 
