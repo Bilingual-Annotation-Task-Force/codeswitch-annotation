@@ -32,13 +32,13 @@ object CharacterNGramModel {
       }
     
       private[this] val normalizedCounts = conditionalCounts.map { 
-        case (ctx,charCounts) => ctx -> charCounts.mapValues(count => count / contextCountTotals(ctx).toDouble )
+        case (ctx,charCounts) => ctx -> charCounts.mapValues(count => (count + 1) / (contextCountTotals(ctx).toDouble + 26))
       }
       
       def getLanguage(): String = { language }
       
       def prob(ctx: String, c: String): Double = {
-        normalizedCounts.getOrElse(ctx, Map.empty).get(c).map(x => x + 1.0).getOrElse(1.0)
+        normalizedCounts.getOrElse(ctx, Map.empty).getOrElse(c, 1.0 / (contextCountTotals.getOrElse(ctx, 0).toDouble + 26))
       }
       
       def stringProb(string: String): Double = {

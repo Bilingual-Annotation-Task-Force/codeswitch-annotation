@@ -12,7 +12,7 @@ class codeSwitchedLanguageModel(
     def guess(string: String) : String = {
       val highestProb = models.map(_.stringProb(string)).max
       val guess = models.filter(x => x.stringProb(string) == highestProb)
-      return guess(0).getLanguage()
+      guess(0).getLanguage()
     }
     
     def prob(language: String, word: String) : Double = {

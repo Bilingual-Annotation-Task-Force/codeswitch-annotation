@@ -23,6 +23,8 @@ object Evaluation {
     val spanData = toWords(Source.fromFile("MexCorpus.txt").getLines().toVector)
     val enModel = new NgramModel("english", getConditionalCounts(engData, n), n)
     val esModel = new NgramModel("spanish", getConditionalCounts(spanData, n), n)
+    
+    
     val cslm = new codeSwitchedLanguageModel(Vector(enModel, esModel))
     val eval = new Evaluator(cslm)
     //eval.annotate("Killer_Cronicas")
@@ -120,15 +122,13 @@ class Evaluator(cslm : codeSwitchedLanguageModel) {
       val words = Source.fromFile(filename).getLines().flatMap(_.split(" ")).filter(w => !w.isEmpty()).toArray
       var output = new PrintStream(new FileOutputStream(filename + "-outputwithHMM.txt"))
       val tags = Array("english", "spanish")
-      val engprobs = Array(0.6, 0.4)
-      val spanprobs = Array(0.4, 0.6)
-      val eng = tags zip engprobs toMap 
-      val span = tags zip spanprobs toMap
+      val eng = tags zip Array(0.7, 0.3) toMap 
+      val span = tags zip Array(0.3, 0.7) toMap
       val transitions = (tags zip Array(eng, span)) toMap
       
       val model = new HMM(words, tags, transitions, cslm)
       model.viterbi()
-      output.println(model.retrace())
+      output.println(model.retrace().toString)
       println("finished")
     }
  
@@ -151,49 +151,42 @@ class HMM(words: Array[String], tagSet: Array[String], transitions: Map[String, 
     
       // init; equal probability of starting with either tag
       for (tag <- 0 until tagSet.length) {
-        v(0)(tag) = new Node(0.5, tag) 
+        v(0)(tag) = new Node(math.log(0.5), tag) 
       }
 
       for (word <- 1 until words.length) {
         for (tag <- 0 until tagSet.length) {
-          //println(tagSet(tag), words(word))
-          val priors = new Array[Node](tagSet.length)
-          for (prevTag <- 0 until tagSet.length) {
-            val transitionProb = v(word-1)(prevTag).getProb * tr(tagSet(prevTag), tagSet(tag))
-            priors(prevTag) = new Node(transitionProb, prevTag)
-            //println("from " + prevTag + " to " + tag + ": " + transitionProb)
-          }
-          
-          // find maximally probable previous tag
-          var max = priors(0)
-          for (t <- 1 until tagSet.length) {
-            if (priors(t).getProb > max.getProb)
-              max = priors(t)
-          }
-          //println("maxProb : " + max.getProb + ", maxPrev: " + max.getPrev)
+          val transitionProbs = List.range(0, tagSet.length) map (x => new Node(v(word-1)(x).getProb + math.log(tr(tagSet(x), tagSet(tag))), x)) 
+          val max = transitionProbs.reduceLeft((n1: Node, n2: Node) => if (n1.getProb > n2.getProb) n1 else n2) 
           val emissionProb = em(tagSet(tag), words(word))
-          //println("emission " + word + " under " + tag + ": " + emissionProb)
-          v(word)(tag) = new Node(emissionProb * max.getProb, max.getPrev)     
-          //println("v(" + words(word) + ")(" + tagSet(tag) + "): " + v(word)(tag).getProb)
+          v(word)(tag) = new Node(math.log(emissionProb) + max.getProb, max.getPrev)
+          println("v(" + words(word) + ")(" + tagSet(tag) + "): " + v(word)(tag).getProb)
         }       
       }
     
   }
-  def retrace() : String = {
+  
+  def retrace() : Array[(String, String)] = {
     val tags = new Array[String](words.length)
-    val last = if (v(words.length - 1)(0).getProb > v(words.length - 1)(1).getProb) 0 else 1
+
+    // find most probable final tag    
+    val last = List.range(0, tagSet.length) reduceLeft((x: Int, y: Int) => if (v(words.length - 1)(x).getProb > v(words.length - 1)(y).getProb) x else y)
     tags(words.length - 1) = tagSet(last)
-    var prev = v(words.length - 1)(last).getPrev
+    
+    // follow backpointers to most probable previous tags
+    var prev = v(words.length - 1)(last).getPrev  
     for (k <- (words.length - 2) to 0 by -1){
       tags(k) = tagSet(prev)
       prev = v(k)(prev).getPrev  
     }
-    (words zip tags).mkString(" ")
+   
+    words zip tags
   }
   
   class Node(prob: Double, prevTag: Int) {
-      def getProb() : Double = { prob }
-      def getPrev() : Int = { prevTag }
+      def getProb : Double = { prob }
+      def getPrev : Int = { prevTag }
+
   }
       
 }
