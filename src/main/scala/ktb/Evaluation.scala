@@ -17,179 +17,102 @@ object Evaluation {
     line.replaceAll("\\t|\\n|\\r|\\p{P}", "").split(" ").filter(w => !w.isEmpty()) map (_.toLowerCase)
   }
   
+  
   def main(args: Array[String]): Unit = {
+    
+    val testCorpus = "KillerCronicas_clipped"
+    val goldStandard = "KillerCronicasGoldStandard.txt"
+    
+    // Train two n-gram models on english and mexican oral corpora
     val n = 5 
     val engData = toWords(Source.fromFile("EngCorpus-1m.txt").getLines().toVector)
     val spanData = toWords(Source.fromFile("MexCorpus.txt").getLines().toVector)
-    val enModel = new NgramModel("english", getConditionalCounts(engData, n), n)
-    val esModel = new NgramModel("spanish", getConditionalCounts(spanData, n), n)
+    val enModel = new NgramModel("Eng", getConditionalCounts(engData, n), n)
+    val esModel = new NgramModel("Spn", getConditionalCounts(spanData, n), n)
     
-    
+    // Build code switched language model from English and Spanish n-gram models
     val cslm = new codeSwitchedLanguageModel(Vector(enModel, esModel))
-    val eval = new Evaluator(cslm)
-    //eval.annotate("Killer_Cronicas")
-    //println("accuracy: " + eval.evaluate("Solorio_7k"))
-    eval.evalWithHmm("Killer_Cronicas")
+  
+    // Build Hidden Markov Model with given transition probabilities (emission probabilities given by code switched language model)
+    val testWords = Source.fromFile(testCorpus).getLines().flatMap(_.split(" ")).filter(w => !w.isEmpty()).toArray
+    val tags = Array("Eng", "Spn")
+    val transitions = (tags zip Array(tags zip Array(0.87, 0.13) toMap, tags zip Array(0.13, 0.87) toMap)) toMap
+    val hmm = new HiddenMarkovModel(testWords, tags, transitions, cslm)
+   
+    // Build evaluator using code switched language model and hidden markov model
+    val eval = new Evaluator(cslm, hmm)
+    val accuracy = eval.evaluate(testCorpus, goldStandard)
+    println(accuracy)
+
   }
 
 
 }
 
-class Evaluator(cslm : codeSwitchedLanguageModel) {
+class Evaluator(cslm : codeSwitchedLanguageModel, hmm: HiddenMarkovModel) {
   
     private[this] val classifier = CRFClassifier.getClassifier("classifiers/english.nowiki.3class.distsim.crf.ser.gz");
   
-    /* Evaluating unannotated text (Killer Cronicas)
-    */
-    def annotate(filename: String) = {
-      var output = new PrintStream(new FileOutputStream(filename + "-output.txt"))
-      output.println("Token,Tag")
-
-      val tokens = Source.fromFile(filename).getLines().flatMap(_.split(" ")).filter(w => !w.isEmpty()).toVector
-      tokens.foreach { x =>
-        output.print(x + ",")
-        val word = x.toLowerCase()
-        if (word.charAt(0) >= 'a' && word.charAt(0) <= 'z') { 
-           // check to see if word is a named entity, i.e., <PERSON>, <LOCATION>, etc. 
-           var classification = classifier.classifyWithInlineXML(word)
-           if (classification.charAt(0) == '<'){
-             output.println("NAMED ENTITY")
-           }              
-           else {
-             val guessedLang = cslm.guess(word)
-             output.println(guessedLang)
-           }
-          
-        }
-        // otherwise, word is punctuation and should not be evaluated
-        else {
-          output.println("OTHER")
-        }
-      }
-
-    }
     
-   /* evaluate accuracy against gold standard (Solorio's)
-   */   
-    def evaluate(filename: String) : Double = {
-
-      var outputFile = new FileOutputStream(filename + "-output.txt")
-      var output = new PrintStream(outputFile)
-      val lines = Source.fromFile(filename).getLines()
+    /*
+     * KC accuracy without HMM model, only guessing using clsm
+     *  - Eng/Spn : 0.9540414161656646
+     * KC accuracy with HMM params { p(same language) = 87%, p(code switch) = 13% }:
+     *  - Eng/Spn : 0.9728790915163661
+     *  - Eng/Spn/NamedEnt: 0.9445976435196791
+     *  - Eng/Spn/NamedEnt/NonStSpn/NonStEng: 0.9409414408790111
+     */
+    def evaluate(text: String, goldStandard: String) : Double = {
       
+      var outputFile = new FileOutputStream(text + "-output.txt")
+      var output = new PrintStream(outputFile)
+      output.println("Word \t Guess \t Tag \t Correct/Incorrect")
+      val lines = Source.fromFile(goldStandard).getLines().toArray
+      val hmmtags = hmm.generateTags()
+ 
       // counts to calculate accuracy
       var correct = 0
       var total = 0
       
-      lines.foreach { x =>
-        val tokens = x.split(",")
-        output.print(tokens(0) + ",")
-        val word = tokens(0).toLowerCase()
-        if (word.charAt(0) >= 'a' && word.charAt(0) <= 'z') { 
-          
-           // check to see if word is a named entity, i.e., <PERSON>, <LOCATION>, etc. 
-           var classification = classifier.classifyWithInlineXML(word)
-           if (classification.charAt(0) == '<'){
-             output.println("NAMED ENTITY")
-           }
-           
-           // else, guess the language using n-gram models and update count of correct guesses
-           else {
-             val correctLang = tokens(tokens.length - 1)
-             val guessedLang = cslm.guess(word)
-             output.print(guessedLang + ",")
-             if (guessedLang == correctLang){
-               correct += 1
-               output.println("CORRECT")
-             }
-             else {
-               output.println("INCORRECT")
-             }
-             total += 1
-           }
-          
+      for (k <- 0 until lines.length) {
+        val annotation = lines(k).split("\t")
+        val word = annotation(0)
+        val tag = annotation(1)
+        var guess = hmmtags(k)
+        //var guess = cslm.guess(word)
+        
+        // Check if word is punctuation
+        if (word.matches("\\p{P}")) {
+          guess = "Punct"
         }
-        // otherwise, word is punctuation and should not be evaluated
-        else {
-          output.println("Other")
+        
+        // Check if word is a named entity, i.e., <PERSON>, <LOCATION>, etc. 
+        var classification = classifier.classifyWithInlineXML(word)
+        if (classification.contains('<')){
+          guess = "NamedEnt"
         }
+                
+        output.print(word + "," + guess + "," + tag)
+
+        // Evaluate accuracy of model against words annotated as English or Spanish in the gold standard
+        if (tag == "Eng" || tag == "Spn") {
+          if (guess == tag)
+            correct += 1
+          else
+            output.print("\t INCORRECT")
+          total += 1
+
+        }
+        output.println()
+
       }
       
       return correct.toDouble / total.toDouble
-    }
-    
-    def evalWithHmm(filename: String) = {
-      val words = Source.fromFile(filename).getLines().flatMap(_.split(" ")).filter(w => !w.isEmpty()).toArray
-      var output = new PrintStream(new FileOutputStream(filename + "-outputwithHMM.txt"))
-      val tags = Array("english", "spanish")
-      val eng = tags zip Array(0.7, 0.3) toMap 
-      val span = tags zip Array(0.3, 0.7) toMap
-      val transitions = (tags zip Array(eng, span)) toMap
       
-      val model = new HMM(words, tags, transitions, cslm)
-      model.viterbi()
-      output.println(model.retrace().toString)
-      println("finished")
     }
  
 }
 
-
-class HMM(words: Array[String], tagSet: Array[String], transitions: Map[String, Map[String, Double]], cslm: codeSwitchedLanguageModel) {
-  
-  val v = Array.ofDim[Node](words.length, tagSet.length)
-  
-  def em(ctx: String, word: String) : Double = {
-    cslm.prob(ctx, word)
-  }
-  
-  def tr(ctx: String, tag: String) : Double = {
-    transitions.get(ctx).get(tag)
-  }
-  
-  def viterbi() = {
-    
-      // init; equal probability of starting with either tag
-      for (tag <- 0 until tagSet.length) {
-        v(0)(tag) = new Node(math.log(0.5), tag) 
-      }
-
-      for (word <- 1 until words.length) {
-        for (tag <- 0 until tagSet.length) {
-          val transitionProbs = List.range(0, tagSet.length) map (x => new Node(v(word-1)(x).getProb + math.log(tr(tagSet(x), tagSet(tag))), x)) 
-          val max = transitionProbs.reduceLeft((n1: Node, n2: Node) => if (n1.getProb > n2.getProb) n1 else n2) 
-          val emissionProb = em(tagSet(tag), words(word))
-          v(word)(tag) = new Node(math.log(emissionProb) + max.getProb, max.getPrev)
-          println("v(" + words(word) + ")(" + tagSet(tag) + "): " + v(word)(tag).getProb)
-        }       
-      }
-    
-  }
-  
-  def retrace() : Array[(String, String)] = {
-    val tags = new Array[String](words.length)
-
-    // find most probable final tag    
-    val last = List.range(0, tagSet.length) reduceLeft((x: Int, y: Int) => if (v(words.length - 1)(x).getProb > v(words.length - 1)(y).getProb) x else y)
-    tags(words.length - 1) = tagSet(last)
-    
-    // follow backpointers to most probable previous tags
-    var prev = v(words.length - 1)(last).getPrev  
-    for (k <- (words.length - 2) to 0 by -1){
-      tags(k) = tagSet(prev)
-      prev = v(k)(prev).getPrev  
-    }
-   
-    words zip tags
-  }
-  
-  class Node(prob: Double, prevTag: Int) {
-      def getProb : Double = { prob }
-      def getPrev : Int = { prevTag }
-
-  }
-      
-}
 
 
 	
