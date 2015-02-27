@@ -30,7 +30,6 @@ class HiddenMarkovModel (words: Array[String], tagSet: Array[String], transition
           val max = transitionProbs.reduceLeft((n1: Node, n2: Node) => if (n1.getProb > n2.getProb) n1 else n2) 
           val emissionProb = em(tagSet(tag), words(word))
           v(word)(tag) = new Node(math.log(emissionProb) + max.getProb, max.getPrev)
-          //println("v(" + words(word) + ")(" + tagSet(tag) + "): " + v(word)(tag).getProb)
         }       
       }
     

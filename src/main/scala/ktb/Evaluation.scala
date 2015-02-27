@@ -21,19 +21,19 @@ object Evaluation {
   def main(args: Array[String]): Unit = {
     
     val testCorpus = "KillerCronicas_clipped"
-    val goldStandard = "KillerCronicasGoldStandard.txt"
+    val goldStandard = "KillerCronicasGoldStandard"
     
-    // Train two n-gram models on english and mexican oral corpora
+    // Train two n-gram models on English and Spanish oral corpora
     val n = 5 
     val engData = toWords(Source.fromFile("EngCorpus-1m.txt").getLines().toVector)
     val spanData = toWords(Source.fromFile("MexCorpus.txt").getLines().toVector)
     val enModel = new NgramModel("Eng", getConditionalCounts(engData, n), n)
     val esModel = new NgramModel("Spn", getConditionalCounts(spanData, n), n)
     
-    // Build code switched language model from English and Spanish n-gram models
+    // Build code-switched language model from English and Spanish n-gram models
     val cslm = new codeSwitchedLanguageModel(Vector(enModel, esModel))
   
-    // Build Hidden Markov Model with given transition probabilities (emission probabilities given by code switched language model)
+    // Build Hidden Markov Model with estimated transition probabilities (emission probabilities given by code-switched language model)
     val testWords = Source.fromFile(testCorpus).getLines().flatMap(_.split(" ")).filter(w => !w.isEmpty()).toArray
     val tags = Array("Eng", "Spn")
     val transitions = (tags zip Array(tags zip Array(0.87, 0.13) toMap, tags zip Array(0.13, 0.87) toMap)) toMap
@@ -41,7 +41,7 @@ object Evaluation {
    
     // Build evaluator using code switched language model and hidden markov model
     val eval = new Evaluator(cslm, hmm)
-    val accuracy = eval.evaluate(testCorpus, goldStandard)
+    val accuracy = eval.evaluate(goldStandard)
     println(accuracy)
 
   }
@@ -52,19 +52,19 @@ object Evaluation {
 class Evaluator(cslm : codeSwitchedLanguageModel, hmm: HiddenMarkovModel) {
   
     private[this] val classifier = CRFClassifier.getClassifier("classifiers/english.nowiki.3class.distsim.crf.ser.gz");
-  
+ 
     
     /*
-     * KC accuracy without HMM model, only guessing using clsm
+     * Killer Cronicas accuracy without HMM model, only guessing language using n-gram models:
      *  - Eng/Spn : 0.9540414161656646
-     * KC accuracy with HMM params { p(same language) = 87%, p(code switch) = 13% }:
+     * Killer Cronicas accuracy with incorporated HMM model:
      *  - Eng/Spn : 0.9728790915163661
      *  - Eng/Spn/NamedEnt: 0.9445976435196791
      *  - Eng/Spn/NamedEnt/NonStSpn/NonStEng: 0.9409414408790111
      */
-    def evaluate(text: String, goldStandard: String) : Double = {
+    def evaluate(goldStandard: String) : Double = {
       
-      var outputFile = new FileOutputStream(text + "-output.txt")
+      var outputFile = new FileOutputStream(goldStandard + "_output.txt")
       var output = new PrintStream(outputFile)
       output.println("Word \t Guess \t Tag \t Correct/Incorrect")
       val lines = Source.fromFile(goldStandard).getLines().toArray
@@ -95,7 +95,7 @@ class Evaluator(cslm : codeSwitchedLanguageModel, hmm: HiddenMarkovModel) {
         output.print(word + "," + guess + "," + tag)
 
         // Evaluate accuracy of model against words annotated as English or Spanish in the gold standard
-        if (tag == "Eng" || tag == "Spn") {
+        if (tag == "Eng" || tag == "Spn" || tag == "NamedEnt" || tag == "NonStSpn" || tag == "NonStEng") {
           if (guess == tag)
             correct += 1
           else
@@ -104,13 +104,10 @@ class Evaluator(cslm : codeSwitchedLanguageModel, hmm: HiddenMarkovModel) {
 
         }
         output.println()
-
-      }
-      
-      return correct.toDouble / total.toDouble
-      
+      }      
+      return correct.toDouble / total.toDouble    
     }
- 
+
 }
 
 
