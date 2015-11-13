@@ -3,6 +3,8 @@ package ktb
 class HiddenMarkovModel (words: Array[String], tagSet: Array[String], transitions: Map[String, Map[String, Double]], cslm: codeSwitchedLanguageModel) {
 
   private[this] val v = Array.ofDim[Node](words.length, tagSet.length)
+
+  def getWords(): Array[String] = { words }
   
   def generateTags() : Array[String] = {
     viterbi()
@@ -23,7 +25,6 @@ class HiddenMarkovModel (words: Array[String], tagSet: Array[String], transition
       for (tag <- 0 until tagSet.length) {
         v(0)(tag) = new Node(math.log(0.5), tag) 
       }
-
       for (word <- 1 until words.length) {
         for (tag <- 0 until tagSet.length) {
           val transitionProbs = List.range(0, tagSet.length) map (x => new Node(v(word-1)(x).getProb + math.log(tr(tagSet(x), tagSet(tag))), x)) 

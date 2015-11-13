@@ -1,6 +1,7 @@
 package ktb
 
 import scala.io.Source
+import java.io._
 
 object CharacterNGramModel {
   
@@ -21,7 +22,6 @@ object CharacterNGramModel {
     }
   }
   
-    
   class NgramModel(
       language: String,
       conditionalCounts: Map[String, Map[String, Int]],
@@ -50,6 +50,17 @@ object CharacterNGramModel {
             prob(ctx, lastChar) * count
           }
         ngramProbs.product
+      }
+      
+      def printConditionalCounts() = {
+        var output = new PrintStream("conditionalCounts")
+        output.println("num ngrams: " + (conditionalCounts.keys).size)
+        conditionalCounts foreach { 
+          case (ctx, counts) => {
+             output.println(ctx + "-->")
+             counts foreach { case (char, num) => output.println(char + ": " + num) }
+          }
+        }
       }
       
     }
