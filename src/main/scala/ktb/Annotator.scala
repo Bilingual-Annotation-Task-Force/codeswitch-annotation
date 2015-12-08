@@ -11,7 +11,8 @@ import edu.stanford.nlp.ling.CoreAnnotations;
 
 
 class Annotator (hmm: HiddenMarkovModel){
-    private[this] val engClassifier = CRFClassifier.getClassifier("classifiers/english.nowiki.3class.distsim.crf.ser.gz");
+    private[this] val engClassifier = CRFClassifier.getClassifier("classifiers/english.all.3class.distsim.crf.ser.gz");
+    private[this] val spanClassifier = CRFClassifier.getClassifier("classifiers/spanish.ancora.distsim.s512.crf.ser.gz");
 
     def annotate(filename: String) = {
       var output = new PrintStream(filename + "_annotated.txt", "UTF-8")
@@ -28,10 +29,16 @@ class Annotator (hmm: HiddenMarkovModel){
         }
         
         // Check if word is a named entity, i.e., <PERSON>, <LOCATION>, etc. 
-        var engClassification = engClassifier.classifyWithInlineXML(word)
-        if (engClassification.contains('<')){
-          guess = "NamedEnt"
+        var engClassification = engClassifier.classifyWithInlineXML(word)          
+        var spanClassification = spanClassifier.classifyWithInlineXML(word)
+        if (engClassification.contains('<') && guess == "Eng") {
+          guess = "EngNamedEnt"
         }
+                  
+        if (spanClassification.contains('<') && guess == "Spn"){
+          guess = "SpnNamedEnt"
+        }
+
         
         output.println(word + "," + guess)
       }

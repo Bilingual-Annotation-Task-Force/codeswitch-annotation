@@ -18,7 +18,7 @@ object Annotation_SpinTX {
   
   def main(args: Array[String]): Unit = {
     
-    val testCorpus = "SpinTX/99SpinTXcorpus.txt"
+    val testCorpus = "SpinTX/SpinTXannotations.txt"
     
     // Train two n-gram models on English and Spanish oral corpora
     val n = 5 
